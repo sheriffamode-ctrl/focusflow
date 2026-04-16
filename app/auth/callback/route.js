@@ -1,4 +1,4 @@
-import { createServerSupabaseClient } from '../../../lib/supabase'
+import { createServerSupabaseClient } from '../../../lib/supabase-server'
 import { NextResponse } from 'next/server'
 
 export async function GET(request) {
@@ -13,6 +13,5 @@ export async function GET(request) {
       return NextResponse.redirect(`${origin}${next}`)
     }
   }
-
   return NextResponse.redirect(`${origin}/login?error=auth`)
 }
