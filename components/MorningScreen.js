@@ -14,10 +14,11 @@ export default function MorningScreen({
   const [mode, setMode] = useState('type')
   const [rawText, setRawText] = useState('')
   const [aiTasks, setAiTasks] = useState([])
-  const [step, setStep] = useState('input') // input | thinking | review | building
+  const [step, setStep] = useState('input')
   const [selectedCarry, setSelectedCarry] = useState(carryOverTasks.map(t => t.id))
   const [voiceActive, setVoiceActive] = useState(false)
   const [recognition, setRecognition] = useState(null)
+  const [workDayStart, setWorkDayStart] = useState(profile?.work_start_hour ? `${profile.work_start_hour}:00` : '09:00')
 
   const hasExisting = existingTasks.length > 0
 
@@ -45,6 +46,22 @@ export default function MorningScreen({
     setVoiceActive(false)
   }
 
+  const AI_PRIORITIES = {
+    'finish': 'high', 'deck': 'high', 'report': 'high', 'review': 'high',
+    'strategy': 'high', 'presentation': 'high', 'board': 'high', 'client': 'high',
+    'send': 'medium', 'email': 'medium', 'update': 'medium', 'reply': 'medium',
+    'book': 'medium', 'budget': 'medium', 'sync': 'medium', 'call': 'medium',
+    'check': 'low', 'order': 'low', 'tracker': 'low', 'notion': 'low', 'logs': 'low',
+  }
+
+  function guessPriority(text) {
+    const lower = text.toLowerCase()
+    for (const [kw, pri] of Object.entries(AI_PRIORITIES)) {
+      if (lower.includes(kw)) return pri
+    }
+    return 'medium'
+  }
+
   async function handleAnalyse() {
     if (!rawText.trim() && aiTasks.length === 0) {
       showToast('Add some tasks first!')
@@ -62,8 +79,9 @@ export default function MorningScreen({
       setAiTasks(tasks.map((t, i) => ({ ...t, _id: i })))
       setStep('review')
     } catch {
-      showToast('AI classification failed — check your API key')
-      setStep('input')
+      const lines = rawText.split(/[,\n]+/).map(l => l.trim()).filter(Boolean)
+      setAiTasks(lines.map((l, i) => ({ _id: i, name: l, priority: guessPriority(l) })))
+      setStep('review')
     }
   }
 
@@ -77,19 +95,15 @@ export default function MorningScreen({
 
   async function handleBuildDay() {
     setStep('building')
-    // Save tasks first
     await onTasksConfirmed(aiTasks)
-    // Carry over selected
     const toCarry = carryOverTasks.filter(t => selectedCarry.includes(t.id))
     if (toCarry.length > 0) await onCarryOver(toCarry)
-
-    // Build schedule with AI
     try {
       const allTasks = [...aiTasks, ...toCarry]
       const res = await fetch('/api/tasks/schedule', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tasks: allTasks, profile }),
+        body: JSON.stringify({ tasks: allTasks, profile, workDayStart }),
       })
       const { schedule } = await res.json()
       await onScheduleBuilt(schedule)
@@ -99,23 +113,37 @@ export default function MorningScreen({
     }
   }
 
-  const dateLabel = new Date(today).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })
+  const dateLabel = new Date(today + 'T00:00:00').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })
 
   return (
     <div className="max-w-xl mx-auto px-4 py-10">
-      {/* Hero */}
       <div className="text-center mb-8">
         <p className="text-sm mb-2" style={{ color: '#A8A59E' }}>{dateLabel}</p>
         <h1 className="font-serif text-4xl leading-tight mb-2">
           {step === 'input' ? <>Good morning.<br /><em style={{ color: '#2D5BE3' }}>What's on your plate?</em></> :
-           step === 'thinking' ? 'AI is reading your tasks…' :
+           step === 'thinking' ? 'FocusFlow is reading your tasks…' :
            step === 'review' ? 'Review & adjust priorities' :
            'Building your day…'}
         </h1>
-        {step === 'input' && <p className="text-sm" style={{ color: '#6B6860' }}>Brain-dump everything — AI sorts and schedules your day.</p>}
+        {step === 'input' && <p className="text-sm" style={{ color: '#6B6860' }}>FocusFlow will sort and schedule your day.</p>}
       </div>
 
-      {/* If already has tasks today */}
+      {/* Work day start time */}
+      {step === 'input' && (
+        <div className="card p-4 mb-4 flex items-center justify-between">
+          <div>
+            <p className="font-medium text-sm">When does your day start?</p>
+            <p className="text-xs mt-0.5" style={{ color: '#6B6860' }}>Sets your first time block</p>
+          </div>
+          <input
+            type="time"
+            value={workDayStart}
+            onChange={e => setWorkDayStart(e.target.value)}
+            className="input w-32 text-sm"
+          />
+        </div>
+      )}
+
       {hasExisting && step === 'input' && (
         <div className="card p-4 mb-4 flex items-center justify-between">
           <div>
@@ -126,7 +154,6 @@ export default function MorningScreen({
         </div>
       )}
 
-      {/* Carry-over banner */}
       {carryOverTasks.length > 0 && step === 'input' && (
         <div className="rounded-xl p-4 mb-4 border" style={{ background: '#FDF6E6', borderColor: '#FAC775' }}>
           <p className="font-medium text-sm mb-2" style={{ color: '#B07A1A' }}>
@@ -153,7 +180,6 @@ export default function MorningScreen({
         </div>
       )}
 
-      {/* Input step */}
       {step === 'input' && (
         <div className="card overflow-hidden mb-4">
           <div className="flex items-center justify-between px-4 py-3 border-b" style={{ borderColor: 'rgba(0,0,0,0.06)' }}>
@@ -172,7 +198,7 @@ export default function MorningScreen({
             <textarea
               value={rawText}
               onChange={e => setRawText(e.target.value)}
-              placeholder="Type everything on your mind... e.g. 'Finish the deck for the 3pm call, reply to Ahmed, review budget, book flights, check server logs'"
+              placeholder="Type everything on your mind... e.g. 'Finish the deck for the 3pm call, reply to Ahmed, review budget, book flights'"
               className="w-full p-4 text-sm outline-none resize-none bg-white"
               style={{ minHeight: 140, lineHeight: 1.7 }}
             />
@@ -193,12 +219,12 @@ export default function MorningScreen({
               <p className="text-sm" style={{ color: '#6B6860' }}>
                 {voiceActive ? 'Listening… tap to stop' : 'Tap to speak your tasks'}
               </p>
-              {rawText && <p className="text-sm mt-3 text-left p-3 rounded-lg" style={{ background: '#F0EDE6', color: '#1A1A18' }}>{rawText}</p>}
+              {rawText && <p className="text-sm mt-3 text-left p-3 rounded-lg" style={{ background: '#F0EDE6' }}>{rawText}</p>}
             </div>
           )}
 
-          <div className="flex items-center justify-between px-4 py-3 border-t" style={{ borderColor: 'rgba(0,0,0,0.06)' }}>
-            <span className="text-xs" style={{ color: '#A8A59E' }}>One task per line, or free-write — AI handles the rest</span>
+          <div class="flex items-center justify-between px-4 py-3 border-t" style={{ borderColor: 'rgba(0,0,0,0.06)' }}>
+            <span className="text-xs" style={{ color: '#A8A59E' }}>One task per line, or free-write</span>
             <button onClick={handleAnalyse} disabled={!rawText.trim()} className="btn-primary text-sm">
               Analyse & Schedule →
             </button>
@@ -206,7 +232,6 @@ export default function MorningScreen({
         </div>
       )}
 
-      {/* AI thinking */}
       {step === 'thinking' && (
         <div className="card p-10 text-center">
           <div className="flex gap-2 justify-center mb-4">
@@ -214,11 +239,10 @@ export default function MorningScreen({
               <div key={i} className="w-2.5 h-2.5 rounded-full dot-pulse" style={{ background: '#2D5BE3', animationDelay: `${i*0.2}s` }} />
             ))}
           </div>
-          <p className="text-sm" style={{ color: '#6B6860' }}>Claude is reading your tasks and your history…</p>
+          <p className="text-sm" style={{ color: '#6B6860' }}>FocusFlow is reading your tasks…</p>
         </div>
       )}
 
-      {/* Building schedule */}
       {step === 'building' && (
         <div className="card p-10 text-center">
           <div className="flex gap-2 justify-center mb-4">
@@ -230,26 +254,19 @@ export default function MorningScreen({
         </div>
       )}
 
-      {/* Review step */}
       {step === 'review' && (
         <>
           <div className="card overflow-hidden mb-4">
             <div className="px-4 py-3 border-b" style={{ borderColor: 'rgba(0,0,0,0.06)' }}>
-              <p className="text-sm font-medium">AI classified your tasks — adjust if needed</p>
-              <p className="text-xs mt-0.5" style={{ color: '#6B6860' }}>Claude used your task history to prioritise these</p>
+              <p className="text-sm font-medium">FocusFlow classified your tasks — adjust if needed</p>
             </div>
-            <div className="divide-y" style={{ divideColor: 'rgba(0,0,0,0.06)' }}>
+            <div className="divide-y">
               {aiTasks.map((task, idx) => {
                 const c = PRIORITY_COLORS[task.priority] || PRIORITY_COLORS.medium
                 return (
                   <div key={task._id} className="flex items-center gap-3 px-4 py-3 animate-slide-up">
                     <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: c.dot }} />
                     <span className="flex-1 text-sm">{task.name}</span>
-                    {task.reason && (
-                      <span className="text-xs hidden sm:block max-w-[120px] truncate" style={{ color: '#A8A59E' }} title={task.reason}>
-                        {task.reason}
-                      </span>
-                    )}
                     <select
                       value={task.priority}
                       onChange={e => updateTaskPriority(idx, e.target.value)}
@@ -260,13 +277,12 @@ export default function MorningScreen({
                       <option value="medium">Medium</option>
                       <option value="low">Low</option>
                     </select>
-                    <button onClick={() => removeTask(idx)} className="w-6 h-6 rounded-full flex items-center justify-center text-sm transition-colors hover:bg-red-50 hover:text-red-500" style={{ color: '#A8A59E' }}>×</button>
+                    <button onClick={() => removeTask(idx)} className="w-6 h-6 rounded-full flex items-center justify-center text-sm hover:bg-red-50 hover:text-red-500" style={{ color: '#A8A59E' }}>×</button>
                   </div>
                 )
               })}
             </div>
           </div>
-
           <div className="flex gap-2 justify-end">
             <button onClick={() => setStep('input')} className="btn-secondary text-sm">← Edit tasks</button>
             <button onClick={handleBuildDay} className="btn-primary text-sm">Build my day →</button>
